@@ -1,9 +1,11 @@
 #include <opencv2/opencv.hpp> // opencv
 #include <iostream> // cout and cin
+#include <string>
 #include <math.h> // power, tan
 #include <stdlib.h>  // absolute value
 #include <algorithm> // for sort
 #define pi 3.14159265358979323846
+#define kThres 60
 using namespace std;
 
 // Function for finding median
@@ -98,6 +100,11 @@ int main(int argc, char** argv) {
 	//---------------Geet Video--------------------
 	cv::VideoCapture cap;
 	cap.open( string(argv[1]) );
+	if(!cap.isOpened()){
+		cout << "Could not open or find the video" << endl;
+		return -1;
+	}
+
 	cv::Mat image;
 
 	//-----setting up kalman filter parameters------
@@ -124,10 +131,19 @@ int main(int argc, char** argv) {
 
 	// kalman state re-initialize counter
 	int kCount = 0;
+
+	// Define the codec and create VideoWriter object
+	int fourcc = cv::VideoWriter::fourcc('X','V','I','D');
+	cv::Size fSize(1920,1080);
+	string videoName(argv[1]);
+	cv::VideoWriter out(videoName.append("_output.avi"),fourcc, 20.0, fSize);	// not sure the fourcc code is in the correct type
+
+	int frameNum = 0;
 	for(;;){
 		//---------------GET IMAGE---------------------
-		cap >> image;
-		if( image.empty() ) break;
+		if( !cap.read(image) ) break;
+		frameNum = cap.get(cv::CAP_PROP_POS_FRAMES);
+
 		// name of window to show original image
 		// cv::String originalWindowName = "Original Image";
 		// Show the original image
@@ -311,8 +327,8 @@ int main(int argc, char** argv) {
 							cv::Mat lineMask(image.size().height, image.size().width, CV_8UC1, cv::Scalar(0)); // CV_8UC3 to make it a 3 channel
 							cv::Point q1 = cv::Point(x1, y1);
 							cv::Point q2 = cv::Point(x2, y1);
-							cv::Point q3 = cv::Point(x2, y1-50);
-							cv::Point q4 = cv::Point(x1, y1-50);
+							cv::Point q3 = cv::Point(x2, y1-min((float)(abs(x2-x1)*2)	, (float)50.));
+							cv::Point q4 = cv::Point(x1, y1-min((float)(abs(x2-x1)*2)	, (float)50.));
 							cv::Point lineVertices1[] = {q1,q2,q3,q4};
 							std::vector<cv::Point> lineVertices (lineVertices1, lineVertices1 + sizeof(vertices1) / sizeof(cv::Point));
 							std::vector<std::vector<cv::Point> > lineVerticesToFill;
@@ -323,7 +339,7 @@ int main(int argc, char** argv) {
 							vector<double> lineMean, lineStddev;
 							cv::meanStdDev(imageGray, lineMean, lineStddev, lineMask);
 
-							if(lineMean[0] < mean[0]+1.0*stddev[0]) { // to filter out lines on the background and white cars
+							if(lineMean[0] < mean[0]+1.25*stddev[0]) { // to filter out lines on the background and white cars
 								// Add a row to the matrix
 								horizonLines.resize(lineCounter+1);
 
@@ -347,6 +363,8 @@ int main(int argc, char** argv) {
 
 								// iterate the counter
 								lineCounter++;
+							}else{
+								cout << "white car / background detected";
 							}
 						}
 					} // if x2 != x1
@@ -356,12 +374,16 @@ int main(int argc, char** argv) {
 			// If we still dont have lines then fuck
 			if (addedLine == false) {
 				kCount++;
-				if(kCount > 20){
+				if(kCount > kThres){
 					float Fx[] = {(float)image.size().height*0.50, 0};
 					kalman.statePost = cv::Mat( 2, 1, CV_32F, Fx ).clone();
 					kCount = 0;
 				}
 				cout << "Not enough lines found" << endl;
+
+				// output frame to video file
+				out.write(image);
+
 				cv::imshow("Lane lines on image",image);
 				if( cv::waitKey(33) >= 0 ) break;
 				continue;	// if no line detected the loop starts over again.
@@ -379,12 +401,16 @@ int main(int argc, char** argv) {
 			}
 			if(addedLine == false){
 				kCount++;
-				if(kCount > 20){
+				if(kCount > kThres){
 					float Fx[] = {(float)image.size().height*0.50, 0};
 					kalman.statePost = cv::Mat( 2, 1, CV_32F, Fx ).clone();
 					kCount = 0;
 				}
 				cout << "Not enough non-zero-angle lines found" << endl;
+
+				// output frame to video file
+				out.write(image);
+
 				cv::imshow("Lane lines on image",image);
 				if( cv::waitKey(33) >= 0 ) break;
 				continue;
@@ -469,12 +495,17 @@ int main(int argc, char** argv) {
 			double x2 = image.size().width;
 			double y2 = y1 + (x2-x1)*slope;
 
+
+
 			// Add positive slope line to image
 			x1 = int(x1 + .5);
 			x2 = int(x2 + .5);
 			y1 = int(y1 + .5);
 			y2 = int(y2 + .5);
 			cv::line(laneLineImage, cv::Point(x1, image.size().height-y1), cv::Point(x2, image.size().height - y2), cv::Scalar(0,255,0), 3, 8 );
+
+			// output frame to video file
+			out.write(laneLineImage);
 
 			// Plot positive and negative lane lines
 			cv::imshow("Lane lines on image", laneLineImage);
@@ -483,16 +514,22 @@ int main(int argc, char** argv) {
 		} // end if we got more than one line
 		else { // We do none of that if we don't see enough lines
 			kCount++;
-			if(kCount > 20){
+			if(kCount > kThres){
 				float Fx[] = {(float)image.size().height*0.50, 0};
 				kalman.statePost = cv::Mat( 2, 1, CV_32F, Fx ).clone();
 				kCount = 0;
 			}
 			cout << "Not enough lines found" << endl;
+
+			// output frame to video file
+			out.write(image);
+
 			cv::imshow("Lane lines on image",image);
 			if( cv::waitKey(33) >= 0 ) break;
 			continue;
 		}
-	}//video for loop
+	}//for_loop of frames
+	cap.release();
+	out.release();
 	return 0;
 }
