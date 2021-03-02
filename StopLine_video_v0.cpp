@@ -6,6 +6,7 @@
 #include <algorithm> // for sort
 #define pi 3.14159265358979323846
 #define kThres 60
+#define fRate 12
 using namespace std;
 
 // Function for finding median
@@ -97,7 +98,7 @@ float find_pair(vector<float> vec) {
 }
 */
 int main(int argc, char** argv) {
-	//---------------Geet Video--------------------
+	//---------------Get Video--------------------
 	cv::VideoCapture cap;
 	cap.open( string(argv[1]) );
 	if(!cap.isOpened()){
@@ -106,7 +107,8 @@ int main(int argc, char** argv) {
 	}
 
 	cv::Mat image;
-
+	cap.read(image);
+	cv::resize(image, image, cv::Size(0,0), 1920.0/image.cols, 1920.0/image.cols);
 	//-----setting up kalman filter parameters------
 	// dynamParams = 2 (y and y'(velocity)), measureParams = 1 (y)
 	cv::KalmanFilter kalman(2, 1, 0);
@@ -134,7 +136,7 @@ int main(int argc, char** argv) {
 
 	// Define the codec and create VideoWriter object
 	int fourcc = cv::VideoWriter::fourcc('X','V','I','D');
-	cv::Size fSize(1920,1080);
+	cv::Size fSize(image.size().width, image.size().height);
 	string videoName(argv[1]);
 	cv::VideoWriter out(videoName.append("_output.avi"),fourcc, 20.0, fSize);	// not sure the fourcc code is in the correct type
 
@@ -192,7 +194,7 @@ int main(int argc, char** argv) {
 
 		// Show smoothed image
 		//cv::imshow(smoothedWindowName, smoothedIm);
-		//cv::waitKey(33); // wait for a key press
+		//cv::waitKey(fRate); // wait for a key press
 
 		//--------------------CREATE MASK---------------------------
 		// Create mask to only keep area defined by four corners
@@ -234,7 +236,7 @@ int main(int argc, char** argv) {
 		cv::threshold(smoothedIm, imageThres, mean[0]+1.6*stddev[0], 0, cv::THRESH_TOZERO);
 		cv::String thresholdWindowName = "Threshold image";
 		cv::imshow(thresholdWindowName, imageThres);
-		cv::waitKey(33);
+		cv::waitKey(fRate);
 
 		//---------------EDGE DETECTION---------------------
 		// finds gradient in x,y direction, gradient direction is perpendicular to edges
@@ -261,7 +263,7 @@ int main(int argc, char** argv) {
 
 		// Show masked image
 		cv::imshow("Masked Image", maskedIm);
-		cv::waitKey(33);
+		cv::waitKey(fRate);
 
 		//------------------------HOUGH LINES----------------------------
 		float rho = 2;
@@ -281,8 +283,7 @@ int main(int argc, char** argv) {
 			// std::size_t can store the maximum size of a theoretically possible object of any type
 			for (size_t i = 0; i != lines.size(); ++i) {
 				// Draw line onto image
-				cv::line(allLinesIm, cv::Point(lines[i][0], lines[i][1]),
-				cv::Point(lines[i][2], lines[i][3]), cv::Scalar(0,0,255), 3, 8 );
+				cv::line(allLinesIm, cv::Point(lines[i][0], lines[i][1]), cv::Point(lines[i][2], lines[i][3]), cv::Scalar(0,0,255), 3, 8 );
 			}
 			// Display images
 			//cv::imshow("Hough Lines", allLinesIm);
@@ -291,7 +292,6 @@ int main(int argc, char** argv) {
 			//---------------Select horizontal lines which is qualified--------------------
 			// Define arrays for positive/negative lines
 			vector< vector<double> > horizonLines;
-			vector<float> yValues;
 
 			// keep record of lines founded when we added one
 			bool addedLine = false;
@@ -327,8 +327,8 @@ int main(int argc, char** argv) {
 							cv::Mat lineMask(image.size().height, image.size().width, CV_8UC1, cv::Scalar(0)); // CV_8UC3 to make it a 3 channel
 							cv::Point q1 = cv::Point(x1, y1);
 							cv::Point q2 = cv::Point(x2, y1);
-							cv::Point q3 = cv::Point(x2, y1-min((float)(abs(x2-x1)*2)	, (float)50.));
-							cv::Point q4 = cv::Point(x1, y1-min((float)(abs(x2-x1)*2)	, (float)50.));
+							cv::Point q3 = cv::Point(x2, y1-min( (float)(abs(x2-x1)*2.5),(float)50. ));
+							cv::Point q4 = cv::Point(x1, y1-min( (float)(abs(x2-x1)*2.5),(float)50. ));
 							cv::Point lineVertices1[] = {q1,q2,q3,q4};
 							std::vector<cv::Point> lineVertices (lineVertices1, lineVertices1 + sizeof(vertices1) / sizeof(cv::Point));
 							std::vector<std::vector<cv::Point> > lineVerticesToFill;
@@ -353,10 +353,6 @@ int main(int argc, char** argv) {
 								horizonLines[lineCounter][3] = y2;
 								horizonLines[lineCounter][4] = -slope;
 								horizonLines[lineCounter][5] = -angle;
-
-								// add yValues
-								yValues.push_back(y1);
-								yValues.push_back(y2);
 
 								// Note that we added a positive slope line
 								addedLine = true;
@@ -385,7 +381,7 @@ int main(int argc, char** argv) {
 				out.write(image);
 
 				cv::imshow("Lane lines on image",image);
-				if( cv::waitKey(33) >= 0 ) break;
+				if( cv::waitKey(fRate) >= 0 ) break;
 				continue;	// if no line detected the loop starts over again.
 			}
 
@@ -412,7 +408,7 @@ int main(int argc, char** argv) {
 				out.write(image);
 
 				cv::imshow("Lane lines on image",image);
-				if( cv::waitKey(33) >= 0 ) break;
+				if( cv::waitKey(fRate) >= 0 ) break;
 				continue;
 			}
 			sort(horizonAngles.begin(), horizonAngles.end());
@@ -478,15 +474,13 @@ int main(int argc, char** argv) {
 			// predict point position
 			cv::Mat y_k = kalman.predict();
 			//measurement
-			z_k.at<float>(0) = yIntMode;
-			z_k.at<float>(1) = 0;
+			z_k = yIntMode;
 			// adjust Kalman filter state
 			kalman.correct( z_k );
 
 			//-----------------------PLOT LANE LINES------------------------
 			// Create image, horizontal lines on real image
 			cv::Mat laneLineImage = image.clone();
-			cv::Mat laneFill = image.clone();
 
 			float slope = tan (angleMean * pi/180);
 			double x1 = 0;
@@ -498,7 +492,7 @@ int main(int argc, char** argv) {
 
 
 			// Add positive slope line to image
-			x1 = int(x1 + .5);
+			x1 = int(x1 + .5);	// round
 			x2 = int(x2 + .5);
 			y1 = int(y1 + .5);
 			y2 = int(y2 + .5);
@@ -509,7 +503,7 @@ int main(int argc, char** argv) {
 
 			// Plot positive and negative lane lines
 			cv::imshow("Lane lines on image", laneLineImage);
-			if( cv::waitKey(33) >= 0 ) break;
+			if( cv::waitKey(fRate) >= 0 ) break;
 
 		} // end if we got more than one line
 		else { // We do none of that if we don't see enough lines
@@ -519,14 +513,13 @@ int main(int argc, char** argv) {
 				kalman.statePost = cv::Mat( 2, 1, CV_32F, Fx ).clone();
 				kCount = 0;
 			}
-			cout << "Not enough lines found" << endl;
+			cout << "Not enough hough lines found" << endl;
 
 			// output frame to video file
 			out.write(image);
 
 			cv::imshow("Lane lines on image",image);
-			if( cv::waitKey(33) >= 0 ) break;
-			continue;
+			if( cv::waitKey(fRate) >= 0 ) break;
 		}
 	}//for_loop of frames
 	cap.release();
